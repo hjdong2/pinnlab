@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinnlab"
+version = "0.1.0"
+description = "Physics-informed neural networks for fluid mechanics, evaluated like a numerical method"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.2", "numpy", "matplotlib", "pyyaml"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+src = ["src"]
+extend-exclude = ["scratch"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

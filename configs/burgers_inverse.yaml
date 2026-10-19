@@ -1,0 +1,25 @@
+
+# configs/example.yaml
+name: burgers_inverse
+problem: inverse
+seed: 1234
+dtype: float32
+nu: 0.0031830988618379067   # 0.01 / pi
+lambda_init: 0.5
+nu_init: 0.05
+model:
+  width: 20
+  depth: 8
+data:
+  n_data: 2000
+  noise: 0.01
+sampling:
+  n_f: 10000
+loss_weights:
+  data: 1.0
+  pde: 1.0
+train:
+  adam_iters: 5000
+  lr: 1.0e-3
+  lbfgs_iters: 5000
+  log_freq: 50

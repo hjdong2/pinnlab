@@ -1,0 +1,23 @@
+
+# configs/example.yaml
+name: burgers_forward_f64
+problem: forward
+seed: 1234
+dtype: float64
+nu: 0.0031830988618379067   # 0.01 / pi
+model:
+  width: 20
+  depth: 8
+sampling:
+  n_f: 10000
+  n_0: 256
+  n_b: 200
+loss_weights:
+  pde: 1.0
+  ic: 1.0
+  bc: 1.0
+train:
+  adam_iters: 5000
+  lr: 1.0e-3
+  lbfgs_iters: 5000
+  log_freq: 50
