@@ -4,7 +4,6 @@ import time
 import torch
 
 
-# history = train(loss_fcn, model.parameters(), adam_iters=2000, lr=1e-3, lbfgs_iters=2000, log_every=10)
 def train(loss_fcn, params, adam_iters, lr, lbfgs_iters, log_freq=100, callback=None):
     """Adam to get a good start, and then turn to L-BFGS.
         loss_fcn() return (l_tot, parts)
