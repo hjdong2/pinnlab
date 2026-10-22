@@ -6,8 +6,9 @@ PINNs are evaluated the way one would evaluate any new numerical method:
 checked against exact solutions and published benchmarks, with their
 error and cost measured, and with attention to where they struggle.
 
-> **Status:** Phase 1 (Burgers' equation, forward and inverse problems) is complete.
-> Phase 2 (steady Navier–Stokes: Kovasznay flow) is next.
+> **Status:** Phase 1 (viscous Burgers' equation, forward and inverse problems) is complete. A pilot study of
+> Phase 2 (inviscid Burgers: Riemann problems with shocks and rarefactions) is done; the 1-D Euler equations
+> (Sod shock tube) come next.
 
 ## Highlights
 
@@ -17,13 +18,18 @@ error and cost measured, and with attention to where they struggle.
   Raissi et al. (2019) for this benchmark problem.
 - **Inverse problem:** from 2,000 measurements with 1% noise, starting from guesses 2× ($\lambda_1$) and 16× ($\nu$)
   off, the PINN recovers $\lambda_1$ to **0.08%** and $\nu$ to **1.0%**; the data misfit settles at the noise level.
-- **Tested:** 10 pytest tests, including a manufactured solution for the PDE residual and the Basdevant benchmark.
+- **Shocks (pilot):** with artificial viscosity, the PINN reproduces the Rankine–Hugoniot shock speed (0.4993 vs 0.5)
+  and the viscous shock width. Its position error came entirely from the discontinuous initial condition (diagnosed
+  through mass conservation); regularizing the initial step removes it, after which the error is the theoretical
+  viscosity error $4\ln 2\,\nu$. For a rarefaction the PINN selects the entropy-correct fan.
+- **Tested:** 16 pytest tests, including a manufactured solution for the PDE residual, the Basdevant benchmark, and
+  exact Riemann solutions (shock speed, rarefaction fan, viscous shock profile).
 
 ## Problem
 
 We study the viscous Burgers' equation
 
-$$u_t + \lambda_1\, u\, u_x = \nu\, u_{xx}, \qquad x \in [-1, 1],\ t \in [0, 1],$$
+$$u_t + \lambda_1\ u\ u_x = \nu\ u_{xx}, \qquad x \in [-1, 1],\ t \in [0, 1],$$
 
 with $\nu = 0.01/\pi$, initial condition $u(x, 0) = -\sin(\pi x)$ and boundary conditions $u(\pm 1, t) = 0$.
 A shock forms at $x = 0$ around $t \approx 0.4$, where the gradient reaches $|u_x| \approx 152$: the kind of sharp
@@ -85,6 +91,55 @@ $(0.01\,\mathrm{std}(u))^2 = 3.75 \times 10^{-5}$: the network fits the true sol
 residual keeps decreasing. $\nu$ is harder to identify than $\lambda_1$ because it multiplies $u_{xx}$, which is
 significant only inside the thin shock, whereas $u\,u_x$ (the $\lambda_1$ term) is large almost everywhere.
 
+## Phase 2a: shocks and rarefactions (pilot study)
+
+Inviscid Burgers' equation $u_t + u\,u_x = 0$ on $x \in [-1, 1]$, $t \in [0, 1]$ with a step initial condition
+($u_L$ for $x < 0$, $u_R$ for $x > 0$): a **shock** for $u_L = 1, u_R = 0$ (speed $s = (u_L + u_R)/2 = 0.5$) and a
+**rarefaction** for $u_L = 0, u_R = 1$. A strong-form residual is undefined at a true discontinuity and a tanh network
+is smooth, so the PINN solves $u_t + u\,u_x = \nu\,u_{xx}$ with a small **artificial viscosity** $\nu$, like a
+shock-capturing scheme. Boundary values $u(-1, t) = u_L$, $u(1, t) = u_R$ (the waves stay inside the domain).
+
+**References** (`src/pinnlab/problems/riemann.py`, tested in `tests/test_riemann.py`): the exact inviscid entropy
+solution, and the exact viscous shock profile
+$u = \tfrac{u_L + u_R}{2} - \tfrac{u_L - u_R}{2}\tanh\big(\tfrac{(u_L - u_R)(x - s t)}{4\nu}\big)$ (written with tanh so
+it cannot overflow). They split the PINN error into a **viscosity error** (viscous vs inviscid, exactly
+$\int |u_\nu - u_0|\,dx = 4\ln 2\,\nu$ for the shock) and a **training error** (PINN vs viscous). Errors are measured in
+$L_1$, the natural norm for discontinuous solutions, together with shock-specific metrics: position (midpoint crossing,
+linearly interpolated) and 10–90% thickness.
+
+**1. The position error came from the initial condition, not the dynamics.** With the step initial condition
+($\nu = 10^{-2}$), the PINN shock moved at speed 0.4993 (Rankine–Hugoniot: 0.5) with the correct viscous width, but
+sat a constant ~0.012 behind its exact position; with different initial-condition settings the offset flipped to
++0.016. Measuring the **mass error** $\int (u_{\rm PINN} - u_{\rm exact})\,dx$ over time showed why: it was already
+present at $t = 0$, equal to the offset, and constant afterwards. A smooth network cannot represent the step, and the
+center of its smoothed step is only weakly determined by the initial-condition loss. Regularizing the initial step at
+the viscous scale (a tanh profile with the exact mass) removed the offset, lowered the final loss from $6.3 \times
+10^{-5}$ to $2.3 \times 10^{-7}$, and cut the training error 70×.
+
+![Shock with regularized initial condition (ν = 10⁻²): reference, PINN, |error| (top); profiles at t = 0.25, 0.5, 0.75 (bottom)](docs/figures/riemann_shock.png)
+
+**2. Viscosity vs training error.** With the regularized initial condition and a fixed budget (20×4 network,
+$10^4$ collocation points, 2,000 Adam + 2,000 L-BFGS iterations, about 1 min per run):
+
+| $\nu$ | viscosity error $4\ln 2\,\nu$ | training error ($L_1$ vs viscous) | total ($L_1$ vs inviscid) | position offset | thickness / theory |
+|---|---|---|---|---|---|
+| $10^{-2}$ | 0.0277 | 1.5e-4 | 0.0277 | −3e-5 | 0.999 |
+| $3 \times 10^{-3}$ | 0.0083 | 2.7e-4 | 0.0085 | 1e-4 | 0.999 |
+| $10^{-3}$ | 0.0028 | 3.2e-4 | 0.0030 | 1e-4 | 0.998 |
+
+![L1 errors vs artificial viscosity: viscosity error (line), training and total error (markers)](docs/figures/riemann_nu_tradeoff.png)
+
+The total error follows the viscosity error (slope 1 in ν); the training error grows slowly as the shock steepens
+(roughly $\nu^{-1/3}$). Extrapolating, the two would cross near $\nu \approx 2 \times 10^{-4}$ for this budget (dotted
+line), below which lowering ν would stop helping. This is a 3-point, single-seed estimate.
+
+**3. Rarefaction: the entropy solution, and a larger viscosity cost.** For $u_L < u_R$ an unphysical expansion shock is
+also a weak solution; only viscosity (vanishing-viscosity limit) selects the fan. The PINN's steepest slope relative
+to the fan's ($1/t$) was 0.77 ($\nu = 10^{-2}$) and 0.97 ($\nu = 10^{-3}$), versus ≈ 11 and ≈ 110 for a smoothed
+expansion shock: **it selects the fan**. Its $L_1$ error at $t = 0.5$ (0.058 and 0.0099) is close to that of the exact
+viscous solution (0.051 and 0.0092, via Cole–Hopf), so the training error is again small, but larger than for the
+shock at the same ν: shocks self-sharpen to a width ~ν, while the fan's corners diffuse over ~$\sqrt{\nu t}$.
+
 ## Performance notes
 
 - **Threads.** For this small network, 2 CPU threads per run were fastest (38 ms per iteration); 14 threads were
@@ -103,7 +158,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev]"
 
-pytest -q                                                               # 10 verification and smoke tests
+pytest -q                                                               # 16 verification and smoke tests
 python -u scripts/run_burgers.py configs/burgers_forward.yaml --quick   # ~15 s pipeline check
 python -u scripts/run_burgers.py configs/burgers_forward_f64.yaml       # forward problem, float64
 python -u scripts/run_burgers.py configs/burgers_inverse.yaml           # inverse problem
@@ -121,9 +176,11 @@ src/pinnlab/
   plotting.py          solution / error maps and loss curves
   utils.py             autograd helper, relative L2 error
   problems/burgers.py  PDE residual, exact Cole–Hopf solution, forward and inverse losses
+  problems/riemann.py  exact Riemann solutions (inviscid, viscous shock), shock metrics, Riemann-problem loss
 scripts/
   run_burgers.py       config-driven experiment runner
   bench_threads.py     CPU thread-count benchmark
+  pilot/               Phase 2a pilot: viscosity sweep, trade-off plot, rarefaction runs
 configs/               one YAML file per experiment
 tests/                 verification and smoke tests
 docs/figures/          figures used in this README
@@ -133,10 +190,10 @@ docs/figures/          figures used in this README
 
 | Phase | Problem | Question |
 |---|---|---|
-| 1 ✅ | Burgers' equation, forward and inverse | Can a PINN capture a shock, and recover PDE coefficients from noisy data? |
-| 2 | Kovasznay flow (steady Navier–Stokes, exact solution) | Does the PINN error converge with network size and collocation density, like mesh refinement? How does error vs. cost compare with a classical solver? |
-| 3 | Lid-driven cavity, Re 100 → 1000 (vs. Ghia et al. 1982) | Where do PINNs fail as Re grows, and which fixes help (adaptive loss weights, residual-based sampling, Fourier features)? |
-| 4 | Cylinder wake, inverse | Recover velocity and pressure fields from sparse velocity measurements. |
+| 1 ✅ | Viscous Burgers' equation, forward and inverse | Can a PINN capture a steep shock, and recover PDE coefficients from noisy data? |
+| 2 (pilot ✅) | Inviscid Burgers, Riemann problems | How well does a PINN with artificial viscosity capture true discontinuities, compared with exact solutions and implicit shock tracking? |
+| 3 | 1-D Euler equations, Sod shock tube | Strong-form vs conservative/weak PINN formulations for a system with shock, contact and rarefaction. |
+| 4 | Inverse shock problems | Recover a shock's location or speed from sparse noisy data: where PINNs may add value. |
 
 ## References
 
