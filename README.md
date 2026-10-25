@@ -21,7 +21,7 @@ error and cost measured, and with attention to where they struggle.
 - **Shocks (pilot):** with artificial viscosity, the PINN reproduces the Rankine–Hugoniot shock speed (0.4993 vs 0.5)
   and the viscous shock width. Its position error came entirely from the discontinuous initial condition (diagnosed
   through mass conservation); regularizing the initial step removes it, after which the error is the theoretical
-  viscosity error $4\ln 2\,\nu$. For a rarefaction the PINN selects the entropy-correct fan.
+  viscosity error $4\ln 2 \cdot \nu$. For a rarefaction the PINN selects the entropy-correct fan.
 - **Tested:** 16 pytest tests, including a manufactured solution for the PDE residual, the Basdevant benchmark, and
   exact Riemann solutions (shock speed, rarefaction fan, viscous shock profile).
 
@@ -48,7 +48,7 @@ Setup for all runs: fully connected network, 8 hidden layers × 20 tanh units, i
 
 The reference solution is the ruler for every PINN error reported here, so it is verified before any error is trusted.
 It uses the Cole–Hopf transform, which turns Burgers' equation into the heat equation, whose solution is a Gaussian
-convolution. After the substitution $\eta = \sqrt{4\nu t}\, z$ the integrals are evaluated with the trapezoidal rule,
+convolution. After the substitution $\eta = \sqrt{4\nu t}\cdot z$ the integrals are evaluated with the trapezoidal rule,
 which converges spectrally for this smooth, rapidly decaying integrand; log-sum-exp scaling prevents overflow.
 The full 256 × 101 evaluation grid takes well under a second (vectorized NumPy).
 
@@ -59,7 +59,7 @@ Independent checks, all in `tests/test_burgers.py`:
 - **Initial condition:** exact at $t = 0$, and also reached through the integral formula at $t = 10^{-6}$.
 - **Symmetry and boundaries:** $u(-x, t) = -u(x, t)$ and $u(\pm 1, t) = 0$ to $10^{-12}$.
 - **PDE residual (autograd):** checked against hand-derived derivatives of the manufactured solution
-  $u = \sin(\pi x)\, e^{-t}$, with deliberately unusual $\lambda_1 = 1.3$, $\nu = 0.07$ so that a wrong coefficient
+  $u = \sin(\pi x) e^{-t}$, with deliberately unusual $\lambda_1 = 1.3$, $\nu = 0.07$ so that a wrong coefficient
   cannot hide.
 - **Losses and training:** losses are finite and deterministic, every loss term sends gradients to every weight
   (and to $\lambda_1$, $\log\nu$), and training reduces the loss.
@@ -87,30 +87,30 @@ residual is hardest to satisfy, and the PDE term dominates the final loss.
 
 **Inverse problem.** During Adam, $\nu$ decreases steadily in log space; after the switch to L-BFGS it reaches the true
 value within about 500 evaluations. The data misfit levels off at $3.70 \times 10^{-5}$, matching the noise variance
-$(0.01\,\mathrm{std}(u))^2 = 3.75 \times 10^{-5}$: the network fits the true solution and not the noise, while the PDE
+$(0.01\mathrm{std}(u))^2 = 3.75 \times 10^{-5}$: the network fits the true solution and not the noise, while the PDE
 residual keeps decreasing. $\nu$ is harder to identify than $\lambda_1$ because it multiplies $u_{xx}$, which is
-significant only inside the thin shock, whereas $u\,u_x$ (the $\lambda_1$ term) is large almost everywhere.
+significant only inside the thin shock, whereas $uu_x$ (the $\lambda_1$ term) is large almost everywhere.
 
 ## Phase 2a: shocks and rarefactions (pilot study)
 
-Inviscid Burgers' equation $u_t + u\,u_x = 0$ on $x \in [-1, 1]$, $t \in [0, 1]$ with a step initial condition
+Inviscid Burgers' equation $u_t + u u_x = 0$ on $x \in [-1, 1]$, $t \in [0, 1]$ with a step initial condition
 ($u_L$ for $x < 0$, $u_R$ for $x > 0$): a **shock** for $u_L = 1, u_R = 0$ (speed $s = (u_L + u_R)/2 = 0.5$) and a
 **rarefaction** for $u_L = 0, u_R = 1$. A strong-form residual is undefined at a true discontinuity and a tanh network
-is smooth, so the PINN solves $u_t + u\,u_x = \nu\,u_{xx}$ with a small **artificial viscosity** $\nu$, like a
+is smooth, so the PINN solves $u_t + uu_x = \nuu_{xx}$ with a small **artificial viscosity** $\nu$, like a
 shock-capturing scheme. Boundary values $u(-1, t) = u_L$, $u(1, t) = u_R$ (the waves stay inside the domain).
 
 **References** (`src/pinnlab/problems/riemann.py`, tested in `tests/test_riemann.py`): the exact inviscid entropy
 solution, and the exact viscous shock profile
 $u = \tfrac{u_L + u_R}{2} - \tfrac{u_L - u_R}{2}\tanh\big(\tfrac{(u_L - u_R)(x - s t)}{4\nu}\big)$ (written with tanh so
 it cannot overflow). They split the PINN error into a **viscosity error** (viscous vs inviscid, exactly
-$\int |u_\nu - u_0|\,dx = 4\ln 2\,\nu$ for the shock) and a **training error** (PINN vs viscous). Errors are measured in
+$\int |u_\nu - u_0|dx = 4\ln 2\nu$ for the shock) and a **training error** (PINN vs viscous). Errors are measured in
 $L_1$, the natural norm for discontinuous solutions, together with shock-specific metrics: position (midpoint crossing,
 linearly interpolated) and 10–90% thickness.
 
 **1. The position error came from the initial condition, not the dynamics.** With the step initial condition
 ($\nu = 10^{-2}$), the PINN shock moved at speed 0.4993 (Rankine–Hugoniot: 0.5) with the correct viscous width, but
 sat a constant ~0.012 behind its exact position; with different initial-condition settings the offset flipped to
-+0.016. Measuring the **mass error** $\int (u_{\rm PINN} - u_{\rm exact})\,dx$ over time showed why: it was already
++0.016. Measuring the **mass error** $\int (u_{\rm PINN} - u_{\rm exact}) dx$ over time showed why: it was already
 present at $t = 0$, equal to the offset, and constant afterwards. A smooth network cannot represent the step, and the
 center of its smoothed step is only weakly determined by the initial-condition loss. Regularizing the initial step at
 the viscous scale (a tanh profile with the exact mass) removed the offset, lowered the final loss from $6.3 \times
@@ -138,7 +138,7 @@ also a weak solution; only viscosity (vanishing-viscosity limit) selects the fan
 to the fan's ($1/t$) was 0.77 ($\nu = 10^{-2}$) and 0.97 ($\nu = 10^{-3}$), versus ≈ 11 and ≈ 110 for a smoothed
 expansion shock: **it selects the fan**. Its $L_1$ error at $t = 0.5$ (0.058 and 0.0099) is close to that of the exact
 viscous solution (0.051 and 0.0092, via Cole–Hopf), so the training error is again small, but larger than for the
-shock at the same ν: shocks self-sharpen to a width ~ν, while the fan's corners diffuse over ~$\sqrt{\nu t}$.
+shock at the same ν: shocks self-sharpen to a width ~ν, while the fan's corners diffuse over ~ $\sqrt{\nu t}$.
 
 ## Performance notes
 
