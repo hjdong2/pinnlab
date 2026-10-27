@@ -1,5 +1,9 @@
 
 import numpy as np
+import torch
+
+from ..utils import grad
+from .burgers import _uniform
 
 GAMMA = 1.4
 
@@ -12,7 +16,7 @@ def prim2cons(W, gamma=GAMMA):
 
 def invFlux(W, gamma=GAMMA):
     rho, u, p = W
-    _, rhou, rhoE = prim2cons(W)
+    _, rhou, rhoE = prim2cons(W, gamma)
     return np.array([rhou, rho * u**2 + p, u * (rhoE + p)])
 
 
@@ -132,3 +136,73 @@ def euler_riemann_exact(x, t, W_l, W_r, x0=0.5, gamma=GAMMA):
     p[t == 0] = np.where(x < x0, p_l, p_r)
 
     return rho, u, p
+
+
+def residual(model, xt, gamma=GAMMA):
+    xt.requires_grad_(True)
+    rho, u, p = model(xt)
+    rhoE = p / (gamma - 1) + rho * u**2 * 0.5
+
+    U = [rho, rho * u, rhoE]
+    F = [rho * u, rho * u**2 + p, u * (rhoE + p)]
+    res = []
+
+    for Uk, Fk in zip(U, F):
+        U_t = grad(Uk, xt)[:, 1:2]
+        F_x = grad(Fk, xt)[:, 0:1]
+        res.append(U_t + F_x)
+    return res
+
+
+def sample_clustered(n, frac, delta, x_c, t_max, gen):
+    n_band = int(frac * n)
+    t_b = _uniform(n_band, [0], [t_max], gen)
+    s = _uniform(n_band, [-1.0], [1.0], gen)
+    x_b = x_c(t_b) + delta * s
+    band = torch.cat([x_b, t_b], dim=1)
+
+    rest = _uniform(n - n_band, [0.0, 0.0], [1.0, t_max], gen)
+
+    pts = torch.cat([band, rest], dim=0)
+    pts[:, 0:1] = pts[:, 0:1].clamp(0.0, 1.0)
+    return pts
+
+
+def _mse3(pred, target):
+    return sum((t - p).pow(2).mean() for t, p in zip(target, pred, strict=True))
+
+
+def make_forward_loss_euler(model, W_l, W_r, x_c, nf, n0, nb, frac, delta, t_max,
+                            x0=0.5, gamma=GAMMA, weights=None, seed=0,
+                            frac_ic=0.0, delta_ic=0.05):
+    gen = torch.Generator().manual_seed(seed)
+    weights = weights or {"pde": 1.0, "ic": 1.0, "bc": 1.0}
+
+    xt_f = sample_clustered(nf, frac, delta, x_c, t_max, gen)
+    n_ic_band = int(frac_ic * n0)
+    s_ic = _uniform(n_ic_band, [-1.0], [1.0], gen)
+    x_ic_band = x0 + delta_ic * s_ic
+    x_ic_rest = _uniform(n0 - n_ic_band, [0.0], [1.0], gen)
+    x_ic = torch.cat([x_ic_band, x_ic_rest], dim=0)
+    # x_ic = _uniform(n0, [0.0], [1.0], gen)
+    t_ic = torch.zeros_like(x_ic)
+    xt_ic = torch.cat([x_ic, t_ic], dim=1)
+    W_ic = tuple(torch.where(x_ic < x0, ql, qr) for ql, qr in zip(W_l, W_r))
+
+    t_b = _uniform(nb, [0.0], [t_max], gen)
+    xt_lft = torch.cat([torch.zeros_like(t_b), t_b], dim=1)
+    xt_rht = torch.cat([torch.ones_like(t_b), t_b], dim=1)
+    xt_b = torch.cat([xt_lft, xt_rht], dim=0)
+    W_b = tuple(torch.cat([torch.full_like(t_b, ql), torch.full_like(t_b, qr)], dim=0)
+                for ql, qr in zip(W_l, W_r))
+
+    def loss_fcn():
+        l_pde = sum(r.pow(2).mean() for r in residual(model, xt_f, gamma))
+        l_ic = _mse3(model(xt_ic), W_ic)
+        l_bc = _mse3(model(xt_b), W_b)
+        l_tot = weights["pde"] * l_pde + weights["ic"] * l_ic + weights["bc"] * l_bc
+
+        return l_tot, {"pde": l_pde.item(), "ic": l_ic.item(), "bc": l_bc.item()}
+
+    return loss_fcn
+

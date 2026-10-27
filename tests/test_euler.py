@@ -1,6 +1,7 @@
 
 import numpy as np
 import pytest
+import torch
 
 from pinnlab.problems import euler
 
@@ -73,3 +74,29 @@ def test_lax_entropy():
     lam_str = u_str + c_str_r
     lam_rht = SOD_R[1] + c_r
     assert lam_str > S_R > lam_rht
+
+
+def mms_fields(x, t, xp):
+    rho = 1.0 + 0.2 * xp.sin(2 * np.pi * x - t)
+    u = 0.5 + 0.1 * xp.cos(2 * np.pi * x + t)
+    p = 1.0 + 0.1 * xp.sin(2 * np.pi * x) * xp.exp(-t)
+    return rho, u, p
+
+
+def test_res_match_fd():
+    """audograd residual == central finite difference"""
+    gamma, h = 1.3, 1e-4
+    rng = np.random.default_rng(0)
+    x = rng.uniform(0, 1, 20)
+    t = rng.uniform(0, 1, 20)
+
+    xt = torch.tensor(np.column_stack([x, t]), dtype=torch.float64)
+    fake_model = lambda xt: mms_fields(xt[:, 0:1], xt[:, 1:2], torch)
+    res = euler.residual(fake_model, xt, gamma)
+
+    U = lambda x, t: euler.prim2cons(mms_fields(x, t, np), gamma)
+    F = lambda x, t: euler.invFlux(mms_fields(x, t, np), gamma)
+    res_fd = (U(x, t + h) - U(x, t - h)) / (2 * h) + (F(x + h, t) - F(x - h, t)) / (2 * h)
+
+    for k in range(3):
+        np.testing.assert_allclose(res[k].detach().numpy().ravel(), res_fd[k], atol=1e-6)

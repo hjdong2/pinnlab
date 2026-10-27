@@ -1,7 +1,7 @@
 
 import torch
 from torch import nn
-
+import torch.nn.functional as F
 
 class MLP(nn.Module):
 
@@ -43,3 +43,17 @@ class MLP(nn.Module):
         # normalize x to [-1, 1] using self.lb / self.ub
         x = self.normalize(x)
         return self.net(x)
+
+
+class EulerNet(nn.Module):
+    def __init__(self, width, depth, lb, ub):
+        super().__init__()
+        self.mlp = MLP(2, 3, width, depth, lb, ub)
+
+
+    def forward(self, xt):
+        out = self.mlp(xt)
+        rho = F.softplus(out[:, 0:1])
+        u = out[:, 1:2]
+        p = F.softplus(out[:, 2:3])
+        return rho, u, p
